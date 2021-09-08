@@ -158,7 +158,8 @@ class TransformerModelWrapper:
 
         self.preprocessor = PREPROCESSORS[self.config.wrapper_type](self, self.config.task_name, self.config.pattern_id,
                                                                     self.config.verbalizer_file)
-        self.task_helper = TASK_HELPERS[self.config.task_name](self) if self.config.task_name in TASK_HELPERS else None
+        self.task_helper = TASK_HELPERS[self.config.task_name](
+            self) if self.config.task_name in TASK_HELPERS else None
 
     @classmethod
     def from_pretrained(cls, path: str) -> 'TransformerModelWrapper':
@@ -177,7 +178,8 @@ class TransformerModelWrapper:
 
     def save(self, path: str) -> None:
         """Save a pretrained wrapper."""
-        model_to_save = self.model.module if hasattr(self.model, 'module') else self.model
+        model_to_save = self.model.module if hasattr(
+            self.model, 'module') else self.model
         model_to_save.save_pretrained(path)
         self.tokenizer.save_pretrained(path)
         self._save_config(path)
@@ -222,10 +224,14 @@ class TransformerModelWrapper:
         :return: a tuple consisting of the total number of steps and the average training loss
         """
 
+        # NOTE: @gabastil get the wandb object from kwargs
+        wandb_ = _['wandb_']
+
         train_batch_size = per_gpu_train_batch_size * max(1, n_gpu)
         train_dataset = self._generate_dataset(task_train_data)
         train_sampler = RandomSampler(train_dataset)
-        train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=train_batch_size)
+        train_dataloader = DataLoader(
+            train_dataset, sampler=train_sampler, batch_size=train_batch_size)
 
         unlabeled_dataloader, unlabeled_iter = None, None
 
@@ -233,7 +239,8 @@ class TransformerModelWrapper:
             # we need unlabeled data both for auxiliary language modeling and for knowledge distillation
             assert unlabeled_data is not None
             unlabeled_batch_size = per_gpu_unlabeled_batch_size * max(1, n_gpu)
-            unlabeled_dataset = self._generate_dataset(unlabeled_data, labelled=False)
+            unlabeled_dataset = self._generate_dataset(
+                unlabeled_data, labelled=False)
             unlabeled_sampler = RandomSampler(unlabeled_dataset)
             unlabeled_dataloader = DataLoader(unlabeled_dataset, sampler=unlabeled_sampler,
                                               batch_size=unlabeled_batch_size)
@@ -244,9 +251,11 @@ class TransformerModelWrapper:
 
         if max_steps > 0:
             t_total = max_steps
-            num_train_epochs = max_steps // (max(1, len(train_dataloader) // gradient_accumulation_steps)) + 1
+            num_train_epochs = max_steps // (
+                max(1, len(train_dataloader) // gradient_accumulation_steps)) + 1
         else:
-            t_total = len(train_dataloader) // gradient_accumulation_steps * num_train_epochs
+            t_total = len(
+                train_dataloader) // gradient_accumulation_steps * num_train_epochs
 
         # Prepare optimizer and schedule (linear warmup and decay)
         no_decay = ['bias', 'LayerNorm.weight']
@@ -257,7 +266,8 @@ class TransformerModelWrapper:
              'weight_decay': 0.0}
         ]
 
-        optimizer = AdamW(optimizer_grouped_parameters, lr=learning_rate, eps=adam_epsilon)
+        optimizer = AdamW(optimizer_grouped_parameters,
+                          lr=learning_rate, eps=adam_epsilon)
         scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps,
                                                     num_training_steps=t_total)
 
@@ -275,6 +285,10 @@ class TransformerModelWrapper:
         for _ in train_iterator:
             epoch_iterator = tqdm(train_dataloader, desc="Iteration")
             for _, batch in enumerate(epoch_iterator):
+
+                # NOTE: @gabastil logging epoch values
+                #-                wandb_.log({'epoch': _})
+
                 self.model.train()
                 unlabeled_batch = None
 
@@ -289,17 +303,21 @@ class TransformerModelWrapper:
                             unlabeled_iter = unlabeled_dataloader.__iter__()
 
                     lm_input_ids = unlabeled_batch['input_ids']
-                    unlabeled_batch['input_ids'], unlabeled_batch['mlm_labels'] = self._mask_tokens(lm_input_ids)
-                    unlabeled_batch = {k: t.to(device) for k, t in unlabeled_batch.items()}
+                    unlabeled_batch['input_ids'], unlabeled_batch['mlm_labels'] = self._mask_tokens(
+                        lm_input_ids)
+                    unlabeled_batch = {k: t.to(device)
+                                       for k, t in unlabeled_batch.items()}
 
                 train_step_inputs = {
                     'unlabeled_batch': unlabeled_batch, 'lm_training': lm_training, 'alpha': alpha,
                     'use_logits': use_logits, 'temperature': temperature
                 }
-                loss = self.task_helper.train_step(batch, **train_step_inputs) if self.task_helper else None
+                loss = self.task_helper.train_step(
+                    batch, **train_step_inputs) if self.task_helper else None
 
                 if loss is None:
-                    loss = TRAIN_STEP_FUNCTIONS[self.config.wrapper_type](self)(batch, **train_step_inputs)
+                    loss = TRAIN_STEP_FUNCTIONS[self.config.wrapper_type](
+                        self)(batch, **train_step_inputs)
 
                 if n_gpu > 1:
                     loss = loss.mean()  # mean() to average on multi-gpu parallel training
@@ -310,7 +328,8 @@ class TransformerModelWrapper:
 
                 tr_loss += loss.item()
                 if (step + 1) % gradient_accumulation_steps == 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), max_grad_norm)
                     optimizer.step()
                     scheduler.step()
                     self.model.zero_grad()
@@ -326,9 +345,16 @@ class TransformerModelWrapper:
 
                         print(json.dumps({**logs, **{'step': global_step}}))
 
+                        # NOTE: @gabastil logging loss
+                        wandb_.log(logs)
+
+                # NOTE: @gabastil log training loss
+                wandb_.log({'tr_loss': tr_loss, 'loss_item': loss.item()})
+
                 if 0 < max_steps < global_step:
                     epoch_iterator.close()
                     break
+
                 step += 1
             if 0 < max_steps < global_step:
                 train_iterator.close()
@@ -354,7 +380,8 @@ class TransformerModelWrapper:
         eval_dataset = self._generate_dataset(eval_data, priming=priming)
         eval_batch_size = per_gpu_eval_batch_size * max(1, n_gpu)
         eval_sampler = SequentialSampler(eval_dataset)
-        eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=eval_batch_size)
+        eval_dataloader = DataLoader(
+            eval_dataset, sampler=eval_sampler, batch_size=eval_batch_size)
 
         if n_gpu > 1:
             self.model = torch.nn.DataParallel(self.model)
@@ -375,7 +402,8 @@ class TransformerModelWrapper:
                                                     decoding_strategy=decoding_strategy) if self.task_helper else None
 
                 if logits is None:
-                    logits = EVALUATION_STEP_FUNCTIONS[self.config.wrapper_type](self)(batch)
+                    logits = EVALUATION_STEP_FUNCTIONS[self.config.wrapper_type](
+                        self)(batch)
 
             if preds is None:
                 preds = logits.detach().cpu().numpy()
@@ -385,10 +413,13 @@ class TransformerModelWrapper:
                     question_ids = batch['question_idx'].detach().cpu().numpy()
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-                out_label_ids = np.append(out_label_ids, labels.detach().cpu().numpy(), axis=0)
-                all_indices = np.append(all_indices, indices.detach().cpu().numpy(), axis=0)
+                out_label_ids = np.append(
+                    out_label_ids, labels.detach().cpu().numpy(), axis=0)
+                all_indices = np.append(
+                    all_indices, indices.detach().cpu().numpy(), axis=0)
                 if 'question_idx' in batch:
-                    question_ids = np.append(question_ids, batch['question_idx'].detach().cpu().numpy(), axis=0)
+                    question_ids = np.append(
+                        question_ids, batch['question_idx'].detach().cpu().numpy(), axis=0)
 
         return {
             'indices': all_indices,
@@ -398,7 +429,8 @@ class TransformerModelWrapper:
         }
 
     def _generate_dataset(self, data: List[InputExample], labelled: bool = True, priming: bool = False):
-        features = self._convert_examples_to_features(data, labelled=labelled, priming=priming)
+        features = self._convert_examples_to_features(
+            data, labelled=labelled, priming=priming)
         feature_dict = {
             'input_ids': torch.tensor([f.input_ids for f in features], dtype=torch.long),
             'attention_mask': torch.tensor([f.attention_mask for f in features], dtype=torch.long),
@@ -409,8 +441,10 @@ class TransformerModelWrapper:
             'idx': torch.tensor([f.idx for f in features], dtype=torch.long)
         }
         if self.config.wrapper_type == PLM_WRAPPER:
-            feature_dict['perm_mask'] = torch.tensor([f.perm_mask for f in features], dtype=torch.float)
-            feature_dict['target_mapping'] = torch.tensor([f.target_mapping for f in features], dtype=torch.float)
+            feature_dict['perm_mask'] = torch.tensor(
+                [f.perm_mask for f in features], dtype=torch.float)
+            feature_dict['target_mapping'] = torch.tensor(
+                [f.target_mapping for f in features], dtype=torch.float)
 
         if self.task_helper:
             self.task_helper.add_features_to_dict(features, feature_dict)
@@ -423,9 +457,11 @@ class TransformerModelWrapper:
         for (ex_index, example) in enumerate(examples):
             if ex_index % 10000 == 0:
                 logger.info("Writing example {}".format(ex_index))
-            input_features = self.preprocessor.get_input_features(example, labelled=labelled, priming=priming)
+            input_features = self.preprocessor.get_input_features(
+                example, labelled=labelled, priming=priming)
             if self.task_helper:
-                self.task_helper.add_special_input_features(example, input_features)
+                self.task_helper.add_special_input_features(
+                    example, input_features)
             features.append(input_features)
             if ex_index < 5:
                 logger.info(f'--- Example {ex_index} ---')
@@ -439,7 +475,8 @@ class TransformerModelWrapper:
         probability_matrix = torch.full(labels.shape, 0.15)
         special_tokens_mask = [self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in
                                labels.tolist()]
-        probability_matrix.masked_fill_(torch.tensor(special_tokens_mask, dtype=torch.bool), value=0.0)
+        probability_matrix.masked_fill_(torch.tensor(
+            special_tokens_mask, dtype=torch.bool), value=0.0)
 
         masked_indices = torch.bernoulli(probability_matrix).bool()
 
@@ -449,15 +486,20 @@ class TransformerModelWrapper:
         else:
             ignore_value = -1
 
-        labels[~masked_indices] = ignore_value  # We only compute loss on masked tokens
+        # We only compute loss on masked tokens
+        labels[~masked_indices] = ignore_value
 
         # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-        indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
-        input_ids[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+        indices_replaced = torch.bernoulli(torch.full(
+            labels.shape, 0.8)).bool() & masked_indices
+        input_ids[indices_replaced] = self.tokenizer.convert_tokens_to_ids(
+            self.tokenizer.mask_token)
 
         # 10% of the time, we replace masked input tokens with random word
-        indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-        random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
+        indices_random = torch.bernoulli(torch.full(
+            labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+        random_words = torch.randint(
+            len(self.tokenizer), labels.shape, dtype=torch.long)
         input_ids[indices_random] = random_words[indices_random]
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
@@ -465,7 +507,8 @@ class TransformerModelWrapper:
 
     def generate_default_inputs(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Generate the default inputs required by almost every language model."""
-        inputs = {'input_ids': batch['input_ids'], 'attention_mask': batch['attention_mask']}
+        inputs = {'input_ids': batch['input_ids'],
+                  'attention_mask': batch['attention_mask']}
         if self.config.model_type in ['bert', 'xlnet']:
             inputs['token_type_ids'] = batch['token_type_ids']
         return inputs
@@ -479,8 +522,10 @@ class TransformerModelWrapper:
         mlm_labels, labels = labeled_batch['mlm_labels'], labeled_batch['labels']
 
         outputs = self.model(**inputs)
-        prediction_scores = self.preprocessor.pvp.convert_mlm_logits_to_cls_logits(mlm_labels, outputs[0])
-        loss = nn.CrossEntropyLoss()(prediction_scores.view(-1, len(self.config.label_list)), labels.view(-1))
+        prediction_scores = self.preprocessor.pvp.convert_mlm_logits_to_cls_logits(
+            mlm_labels, outputs[0])
+        loss = nn.CrossEntropyLoss()(
+            prediction_scores.view(-1, len(self.config.label_list)), labels.view(-1))
 
         if lm_training:
             lm_inputs = self.generate_default_inputs(unlabeled_batch)
@@ -496,11 +541,14 @@ class TransformerModelWrapper:
         inputs['perm_mask'], inputs['target_mapping'] = labeled_batch['perm_mask'], labeled_batch['target_mapping']
         labels = labeled_batch['labels']
         outputs = self.model(**inputs)
-        prediction_scores = self.preprocessor.pvp.convert_plm_logits_to_cls_logits(outputs[0])
-        loss = nn.CrossEntropyLoss()(prediction_scores.view(-1, len(self.config.label_list)), labels.view(-1))
+        prediction_scores = self.preprocessor.pvp.convert_plm_logits_to_cls_logits(
+            outputs[0])
+        loss = nn.CrossEntropyLoss()(
+            prediction_scores.view(-1, len(self.config.label_list)), labels.view(-1))
 
         if lm_training:
-            raise NotImplementedError("Language model training is currently not implemented for PLMs")
+            raise NotImplementedError(
+                "Language model training is currently not implemented for PLMs")
 
         return loss
 

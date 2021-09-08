@@ -26,6 +26,7 @@ from pet.utils import eq_div
 from pet.wrapper import WRAPPER_TYPES, MODEL_CLASSES, SEQUENCE_CLASSIFIER_WRAPPER, WrapperConfig
 import pet
 import log
+import wandb
 
 logger = log.get_logger('root')
 
@@ -89,7 +90,8 @@ def load_ipet_config(args) -> pet.IPetConfig:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Command line interface for PET/iPET")
+    parser = argparse.ArgumentParser(
+        description="Command line interface for PET/iPET")
 
     # Required parameters
     parser.add_argument("--method", required=True, choices=['pet', 'ipet', 'sequence_classifier'],
@@ -219,7 +221,8 @@ def main():
 
     if os.path.exists(args.output_dir) and os.listdir(args.output_dir) \
             and args.do_train and not args.overwrite_output_dir:
-        raise ValueError("Output directory ({}) already exists and is not empty.".format(args.output_dir))
+        raise ValueError(
+            "Output directory ({}) already exists and is not empty.".format(args.output_dir))
 
     # Setup CUDA, GPU & distributed training
     args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
@@ -235,8 +238,10 @@ def main():
     train_ex_per_label, test_ex_per_label = None, None
     train_ex, test_ex = args.train_examples, args.test_examples
     if args.split_examples_evenly:
-        train_ex_per_label = eq_div(args.train_examples, len(args.label_list)) if args.train_examples != -1 else -1
-        test_ex_per_label = eq_div(args.test_examples, len(args.label_list)) if args.test_examples != -1 else -1
+        train_ex_per_label = eq_div(args.train_examples, len(
+            args.label_list)) if args.train_examples != -1 else -1
+        test_ex_per_label = eq_div(args.test_examples, len(
+            args.label_list)) if args.test_examples != -1 else -1
         train_ex, test_ex = None, None
 
     eval_set = TEST_SET if args.eval_set == 'test' else DEV_SET
@@ -251,7 +256,8 @@ def main():
     args.metrics = METRICS.get(args.task_name, DEFAULT_METRICS)
 
     pet_model_cfg, pet_train_cfg, pet_eval_cfg = load_pet_configs(args)
-    sc_model_cfg, sc_train_cfg, sc_eval_cfg = load_sequence_classifier_configs(args)
+    sc_model_cfg, sc_train_cfg, sc_eval_cfg = load_sequence_classifier_configs(
+        args)
     ipet_cfg = load_ipet_config(args)
 
     if args.method == 'pet':

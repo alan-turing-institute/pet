@@ -352,7 +352,7 @@ def train_pet_ensemble(model_config: WrapperConfig, train_config: TrainConfig, e
     for pattern_id in pattern_ids:
 
         # NOTE: @gabastil add wandb configuration
-        wandb.init(project='xlfs', config=wandb_config, allow_val_change=True)
+        wandb.init('xlfs', config=wandb_config, allow_val_change=True)
         wandb.config.update({'pattern_id': pattern_id}, allow_val_change=True)
 
         for iteration in range(repetitions):
@@ -389,7 +389,8 @@ def train_pet_ensemble(model_config: WrapperConfig, train_config: TrainConfig, e
 
                 results_dict.update(train_single_model(wrapper, train_data, train_config, eval_config,
                                                        ipet_train_data=ipet_train_data,
-                                                       unlabeled_data=unlabeled_data))
+                                                       unlabeled_data=unlabeled_data,
+                                                       wandb_=wandb))
 
                 # NOTE: @gabastil add wandb
                 wandb.log(results_dict)
@@ -460,9 +461,11 @@ def train_pet_ensemble(model_config: WrapperConfig, train_config: TrainConfig, e
         logger.info("=== ENSEMBLE TRAINING COMPLETE ===")
 
 
+# NOTE: @gabastil added wandb_ parameter to track training. To be passed to model.train
 def train_single_model(model: TransformerModelWrapper, train_data: List[InputExample], config: TrainConfig,
                        eval_config: EvalConfig = None, ipet_train_data: List[InputExample] = None,
-                       unlabeled_data: List[InputExample] = None, return_train_set_results: bool = True):
+                       unlabeled_data: List[InputExample] = None, return_train_set_results: bool = True,
+                       wandb_=None):
     """
     Train a single model.
 
@@ -512,7 +515,8 @@ def train_single_model(model: TransformerModelWrapper, train_data: List[InputExa
             lm_training=config.lm_training,
             use_logits=config.use_logits,
             alpha=config.alpha,
-            temperature=config.temperature
+            temperature=config.temperature,
+            wandb_=wandb_
         )
         results_dict['global_step'] = global_step
         results_dict['average_loss'] = tr_loss
